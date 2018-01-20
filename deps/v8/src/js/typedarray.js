@@ -15,12 +15,6 @@
 var ArrayToString = utils.ImportNow("ArrayToString");
 var GetIterator;
 var GetMethod;
-var GlobalArray = global.Array;
-var GlobalArrayBuffer = global.ArrayBuffer;
-var GlobalArrayBufferPrototype = GlobalArrayBuffer.prototype;
-var GlobalObject = global.Object;
-var InnerArrayFind;
-var InnerArrayFindIndex;
 var InnerArrayJoin;
 var InnerArraySort;
 var InnerArrayToLocaleString;
@@ -29,7 +23,6 @@ var MathMax = global.Math.max;
 var MathMin = global.Math.min;
 var iteratorSymbol = utils.ImportNow("iterator_symbol");
 var speciesSymbol = utils.ImportNow("species_symbol");
-var toStringTagSymbol = utils.ImportNow("to_string_tag_symbol");
 
 macro TYPED_ARRAYS(FUNCTION)
 FUNCTION(Uint8Array, 1)
@@ -49,13 +42,23 @@ endmacro
 
 TYPED_ARRAYS(DECLARE_GLOBALS)
 
+macro IS_ARRAYBUFFER(arg)
+(%_ClassOf(arg) === 'ArrayBuffer')
+endmacro
+
+macro IS_SHAREDARRAYBUFFER(arg)
+(%_ClassOf(arg) === 'SharedArrayBuffer')
+endmacro
+
+macro IS_TYPEDARRAY(arg)
+(%_IsTypedArray(arg))
+endmacro
+
 var GlobalTypedArray = %object_get_prototype_of(GlobalUint8Array);
 
 utils.Import(function(from) {
   GetIterator = from.GetIterator;
   GetMethod = from.GetMethod;
-  InnerArrayFind = from.InnerArrayFind;
-  InnerArrayFindIndex = from.InnerArrayFindIndex;
   InnerArrayJoin = from.InnerArrayJoin;
   InnerArraySort = from.InnerArraySort;
   InnerArrayToLocaleString = from.InnerArrayToLocaleString;
@@ -151,34 +154,13 @@ function NAMEConstructByIterable(obj, iterable, iteratorFn) {
   }
 }
 
-// ES#sec-typedarray-typedarray TypedArray ( typedArray )
-function NAMEConstructByTypedArray(obj, typedArray) {
-  // TODO(littledan): Throw on detached typedArray
-  var srcData = %TypedArrayGetBuffer(typedArray);
-  var length = %_TypedArrayGetLength(typedArray);
-  var byteLength = %_ArrayBufferViewGetByteLength(typedArray);
-  var newByteLength = length * ELEMENT_SIZE;
-  %typed_array_construct_by_array_like(obj, typedArray, length, ELEMENT_SIZE);
-  // The spec requires that constructing a typed array using a SAB-backed typed
-  // array use the ArrayBuffer constructor, not the species constructor. See
-  // https://tc39.github.io/ecma262/#sec-typedarray-typedarray.
-  var bufferConstructor = IS_SHAREDARRAYBUFFER(srcData)
-                            ? GlobalArrayBuffer
-                            : SpeciesConstructor(srcData, GlobalArrayBuffer);
-  var prototype = bufferConstructor.prototype;
-  // TODO(littledan): Use the right prototype based on bufferConstructor's realm
-  if (IS_RECEIVER(prototype) && prototype !== GlobalArrayBufferPrototype) {
-    %InternalSetPrototype(%TypedArrayGetBuffer(obj), prototype);
-  }
-}
-
 function NAMEConstructor(arg1, arg2, arg3) {
   if (!IS_UNDEFINED(new.target)) {
     if (IS_ARRAYBUFFER(arg1) || IS_SHAREDARRAYBUFFER(arg1)) {
       %typed_array_construct_by_array_buffer(
           this, arg1, arg2, arg3, ELEMENT_SIZE);
     } else if (IS_TYPEDARRAY(arg1)) {
-      NAMEConstructByTypedArray(this, arg1);
+      %typed_array_construct_by_typed_array(this, arg1, ELEMENT_SIZE);
     } else if (IS_RECEIVER(arg1)) {
       var iteratorFn = arg1[iteratorSymbol];
       if (IS_UNDEFINED(iteratorFn)) {
@@ -284,35 +266,6 @@ DEFINE_METHOD_LEN(
   },
   1  /* Set function length. */
 );
-
-
-// ES6 draft 07-15-13, section 22.2.3.10
-DEFINE_METHOD_LEN(
-  GlobalTypedArray.prototype,
-  find(predicate, thisArg) {
-    ValidateTypedArray(this, "%TypedArray%.prototype.find");
-
-    var length = %_TypedArrayGetLength(this);
-
-    return InnerArrayFind(predicate, thisArg, this, length);
-  },
-  1  /* Set function length. */
-);
-
-
-// ES6 draft 07-15-13, section 22.2.3.11
-DEFINE_METHOD_LEN(
-  GlobalTypedArray.prototype,
-  findIndex(predicate, thisArg) {
-    ValidateTypedArray(this, "%TypedArray%.prototype.findIndex");
-
-    var length = %_TypedArrayGetLength(this);
-
-    return InnerArrayFindIndex(predicate, thisArg, this, length);
-  },
-  1  /* Set function length. */
-);
-
 
 // ES6 draft 05-18-15, section 22.2.3.25
 DEFINE_METHOD(
@@ -441,18 +394,6 @@ function TypedArrayConstructor() {
 
 macro SETUP_TYPED_ARRAY(NAME, ELEMENT_SIZE)
   %SetCode(GlobalNAME, NAMEConstructor);
-  %FunctionSetPrototype(GlobalNAME, new GlobalObject());
-  %InternalSetPrototype(GlobalNAME, GlobalTypedArray);
-  %InternalSetPrototype(GlobalNAME.prototype, GlobalTypedArray.prototype);
-
-  %AddNamedProperty(GlobalNAME, "BYTES_PER_ELEMENT", ELEMENT_SIZE,
-                    READ_ONLY | DONT_ENUM | DONT_DELETE);
-
-  %AddNamedProperty(GlobalNAME.prototype,
-                    "constructor", global.NAME, DONT_ENUM);
-  %AddNamedProperty(GlobalNAME.prototype,
-                    "BYTES_PER_ELEMENT", ELEMENT_SIZE,
-                    READ_ONLY | DONT_ENUM | DONT_DELETE);
 endmacro
 
 TYPED_ARRAYS(SETUP_TYPED_ARRAY)
